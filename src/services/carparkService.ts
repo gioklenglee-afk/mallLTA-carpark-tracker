@@ -231,3 +231,101 @@ export function estimateParkingCost(
     isWithinGracePeriod: false,
   };
 }
+
+export interface LTACarParkRecord {
+  CarParkID: string;
+  Area: string;
+  Development: string;
+  Location: string; // e.g. "1.2936 103.8572"
+  AvailableLots: number;
+  LotType: 'C' | 'H' | 'Y'; // C: Car, H: Heavy Vehicle, Y: Motorcycle
+  Agency: 'HDB' | 'LTA' | 'URA';
+}
+
+export async function fetchLiveLTAAvailability(): Promise<{
+  success: boolean;
+  configured: boolean;
+  message?: string;
+  count: number;
+  value: LTACarParkRecord[];
+  timestamp: string;
+  source: string;
+}> {
+  try {
+    const res = await fetch('/api/carparkavailability');
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    return await res.json();
+  } catch (err) {
+    return {
+      success: false,
+      configured: false,
+      message: err instanceof Error ? err.message : 'Fetch error',
+      count: 0,
+      value: [],
+      timestamp: new Date().toISOString(),
+      source: 'unconfigured-standby',
+    };
+  }
+}
+
+export async function checkApiHealth(): Promise<{
+  status: string;
+  ltaAccountKeyConfigured: boolean;
+}> {
+  try {
+    const res = await fetch('/api/health');
+    if (!res.ok) throw new Error('Health check failed');
+    return await res.json();
+  } catch {
+    return { status: 'offline', ltaAccountKeyConfigured: false };
+  }
+}
+
+export function mergeLTALiveData(
+  currentCarparks: Carpark[],
+  ltaRecords: LTACarParkRecord[]
+): Carpark[] {
+  if (!ltaRecords || ltaRecords.length === 0) return currentCarparks;
+
+  // Build index by CarParkID
+  const idMap = new Map<string, LTACarParkRecord[]>();
+  for (const record of ltaRecords) {
+    const id = record.CarParkID.toUpperCase();
+    const existing = idMap.get(id) || [];
+    existing.push(record);
+    idMap.set(id, existing);
+  }
+
+  return currentCarparks.map((cp) => {
+    const records = idMap.get(cp.carparkNumber.toUpperCase());
+    if (!records || records.length === 0) return cp;
+
+    const updatedCarLots = { ...cp.lots.car };
+    const updatedMotorLots = cp.lots.motorcycle ? { ...cp.lots.motorcycle } : undefined;
+    const updatedHeavyLots = cp.lots.heavy ? { ...cp.lots.heavy } : undefined;
+
+    for (const r of records) {
+      if (r.LotType === 'C') {
+        updatedCarLots.available = Math.min(updatedCarLots.total, r.AvailableLots);
+      } else if (r.LotType === 'Y' && updatedMotorLots) {
+        updatedMotorLots.available = Math.min(updatedMotorLots.total, r.AvailableLots);
+      } else if (r.LotType === 'H' && updatedHeavyLots) {
+        updatedHeavyLots.available = Math.min(updatedHeavyLots.total, r.AvailableLots);
+      }
+    }
+
+    return {
+      ...cp,
+      lots: {
+        ...cp.lots,
+        car: updatedCarLots,
+        motorcycle: updatedMotorLots,
+        heavy: updatedHeavyLots,
+      },
+      updatedAt: new Date().toISOString(),
+    };
+  });
+}
+

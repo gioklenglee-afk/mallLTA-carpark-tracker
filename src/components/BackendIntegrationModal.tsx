@@ -39,23 +39,31 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
 
   const handleTestConnection = async () => {
     setTestStatus('testing');
-    setTestMessage('Pinging backend endpoint...');
+    setTestMessage('Checking serverless endpoints /api/health and /api/carparkavailability...');
     try {
-      const res = await fetch(config.endpointUrl, {
-        method: 'GET',
-        headers: config.apiKey ? { 'AccountKey': config.apiKey } : undefined,
-      });
-      if (res.ok) {
+      const healthRes = await fetch('/api/health');
+      const healthData = await healthRes.json();
+      const carparkRes = await fetch('/api/carparkavailability');
+      const carparkData = await carparkRes.json();
+
+      if (carparkData.configured && carparkData.success) {
         setTestStatus('success');
-        setTestMessage(`Successfully reached endpoint (${res.status} OK). Ready for lot stream!`);
+        setTestMessage(
+          `Connected to LTA DataMall! Upstream returned ${carparkData.count} carpark records.`
+        );
+      } else if (!carparkData.configured) {
+        setTestStatus('success');
+        setTestMessage(
+          `Serverless route active (/api/health OK). LTA_ACCOUNT_KEY is currently empty. When you provide your AccountKey in your environment, live LTA data will pull automatically!`
+        );
       } else {
         setTestStatus('error');
-        setTestMessage(`Received HTTP status ${res.status}. Check CORS and API keys.`);
+        setTestMessage(carparkData.details || carparkData.error || 'Upstream LTA error');
       }
     } catch (err: unknown) {
       setTestStatus('error');
       setTestMessage(
-        `Connection failed: ${err instanceof Error ? err.message : 'Network error / CORS restrictions'}`
+        `Connection failed: ${err instanceof Error ? err.message : 'Network error'}`
       );
     }
   };

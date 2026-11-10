@@ -14,6 +14,9 @@ import {
   getSavedFavorites,
   toggleFavorite,
   simulateLotUpdates,
+  fetchLiveLTAAvailability,
+  checkApiHealth,
+  mergeLTALiveData,
   getBackendConfig,
   BackendEndpointConfig,
 } from './services/carparkService';
@@ -32,6 +35,8 @@ import {
   Sparkles,
   RotateCcw,
   AlertCircle,
+  Radio,
+  Wifi,
 } from 'lucide-react';
 
 export default function App() {
@@ -45,6 +50,15 @@ export default function App() {
   const [isBackendModalOpen, setIsBackendModalOpen] = useState<boolean>(false);
   const [isFeeModalOpen, setIsFeeModalOpen] = useState<boolean>(false);
   const [isAutoSimulation, setIsAutoSimulation] = useState<boolean>(true);
+  const [ltaFeedStatus, setLtaFeedStatus] = useState<{
+    configured: boolean;
+    isLive: boolean;
+    totalFetched: number;
+  }>({
+    configured: false,
+    isLive: false,
+    totalFetched: 0,
+  });
 
   const [filters, setFilters] = useState<FilterState>({
     searchQuery: '',
@@ -58,30 +72,90 @@ export default function App() {
     sortBy: 'available',
   });
 
-  // Load saved favorites on mount
+  // Check serverless API health and fetch LTA DataMall feed on mount
   useEffect(() => {
     setFavorites(getSavedFavorites());
+
+    const initLTAConnection = async () => {
+      try {
+        const health = await checkApiHealth();
+        if (health.ltaAccountKeyConfigured) {
+          const ltaData = await fetchLiveLTAAvailability();
+          if (ltaData.success && ltaData.value && ltaData.value.length > 0) {
+            setCarparks((prev) => mergeLTALiveData(prev, ltaData.value));
+            setLtaFeedStatus({
+              configured: true,
+              isLive: true,
+              totalFetched: ltaData.count,
+            });
+            return;
+          }
+        }
+        setLtaFeedStatus({
+          configured: health.ltaAccountKeyConfigured,
+          isLive: false,
+          totalFetched: 0,
+        });
+      } catch (e) {
+        console.warn('LTA feed check failed:', e);
+      }
+    };
+
+    initLTAConnection();
   }, []);
 
-  // Real-time automatic background lot fluctuation simulator
+  // Real-time automatic background lot update (either live LTA or simulated if key pending)
   useEffect(() => {
     if (!isAutoSimulation) return;
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
+      if (ltaFeedStatus.configured) {
+        try {
+          const ltaData = await fetchLiveLTAAvailability();
+          if (ltaData.success && ltaData.value.length > 0) {
+            setCarparks((prev) => mergeLTALiveData(prev, ltaData.value));
+            setLastSyncTime(new Date());
+            return;
+          }
+        } catch {
+          // Fallback to simulation if intermittent upstream
+        }
+      }
       setCarparks((prev) => simulateLotUpdates(prev));
       setLastSyncTime(new Date());
-    }, 12000); // Ticks every 12s to mimic live IU sensors
+    }, 12000);
 
     return () => clearInterval(interval);
-  }, [isAutoSimulation]);
+  }, [isAutoSimulation, ltaFeedStatus.configured]);
 
-  // Handle manual sync
-  const handleManualRefresh = () => {
+  // Handle manual sync via /api/carparkavailability
+  const handleManualRefresh = async () => {
     setIsRefreshing(true);
+    try {
+      const health = await checkApiHealth();
+      if (health.ltaAccountKeyConfigured) {
+        const ltaData = await fetchLiveLTAAvailability();
+        if (ltaData.success && ltaData.value.length > 0) {
+          setCarparks((prev) => mergeLTALiveData(prev, ltaData.value));
+          setLtaFeedStatus({
+            configured: true,
+            isLive: true,
+            totalFetched: ltaData.count,
+          });
+          setLastSyncTime(new Date());
+          setIsRefreshing(false);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Manual refresh LTA API error:', e);
+    }
+
+    // Default simulation update if key is not yet configured
     setTimeout(() => {
       setCarparks((prev) => simulateLotUpdates(prev));
       setLastSyncTime(new Date());
       setIsRefreshing(false);
-    }, 600);
+    }, 400);
   };
 
   const handleToggleFavorite = (carparkId: string, e?: React.MouseEvent) => {
@@ -292,6 +366,29 @@ export default function App() {
           </div>
 
           <span aria-hidden="true" className="text-slate-300">
+            ·
+          </span>
+
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                ltaFeedStatus.isLive
+                  ? 'bg-emerald-500 animate-pulse'
+                  : ltaFeedStatus.configured
+                  ? 'bg-blue-500'
+                  : 'bg-amber-400'
+              }`}
+            />
+            <span className="text-[11px] font-medium text-slate-700">
+              {ltaFeedStatus.isLive
+                ? `LTA DataMall Live (${ltaFeedStatus.totalFetched} records)`
+                : ltaFeedStatus.configured
+                ? 'LTA Key Configured'
+                : 'LTA API Ready (/api/carparkavailability)'}
+            </span>
+          </div>
+
+          <span aria-hidden="true" className="hidden sm:inline text-slate-300">
             ·
           </span>
 
