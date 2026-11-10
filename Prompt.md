@@ -45,3 +45,11 @@ git push https://[GITHUB_PAT_TOKEN]@github.com/gioklenglee-afk/mallLTA-carpark-t
 ```text
 Collate all the prompts into filename Prompt.md
 ```
+
+---
+
+### Prompt 6: GitHub Repository Update Push
+```text
+git push https://[GITHUB_PAT_TOKEN]@github.com/gioklenglee-afk/mallLTA-carpark-tracker
+```
+
