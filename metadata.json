@@ -1,0 +1,6 @@
+{
+  "name": "SG ParkPulse - Singapore Carpark Tracker",
+  "description": "Real-time carpark lots tracker across Singapore HDB, URA, and major shopping destinations with live lot occupancy, clearance height, and rate estimates.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
